@@ -424,11 +424,13 @@ xla_cc_test(
         "//xla:debug_options_flags",
         "//xla/backends/cpu:target_machine_options",
         "//xla/hlo/builder:xla_computation",
+        "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/hlo/transforms:hlo_module_stitcher",
         "//xla/mlir_hlo",
         "//xla/pjrt:maybe_owning_mlir_module",
         "//xla/pjrt:mock_pjrt_client",
+        "//xla/pjrt:pjrt_client",
         "//xla/pjrt:pjrt_compiler",
         "//xla/pjrt:pjrt_executable",
         "//xla/pjrt/plugin/xla_cpu:cpu_client_options",  # buildcleaner: keep
@@ -436,6 +438,7 @@ xla_cc_test(
         "//xla/pjrt/plugin/xla_cpu:cpu_topology_description",
         "//xla/pjrt/plugin/xla_cpu:xla_cpu_pjrt_client",  # buildcleaner: keep
         "//xla/pjrt/proto:compile_options_proto_cc",
+        "//xla/service:hlo_module_config",
         "//xla/service/cpu:executable_proto_cc",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:test_main",
