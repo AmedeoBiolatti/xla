@@ -18,7 +18,6 @@ jobs:
       XLA_BASE_SHA: 5592c20bfec6e5e7999c6acc5e6dc5190612a07d
       XLA_SOURCE_SHA256: 12e31b563a1ddacf5ef68ae222edca04bb469e0fba8b7b7d655f4a372046e755
       XLA_TEST_SHA256: 97e3bfa19b5d68c69efe96da4527bb9e012b2be57e88f04ebdd7e606f74b5dcd
-      XLA_RESULT_DIR: ${{ runner.temp }}/xla-52711-results
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

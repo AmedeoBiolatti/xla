@@ -14,6 +14,7 @@
 # limitations under the License.
 
 set -euo pipefail
+export XLA_RESULT_DIR="$RUNNER_TEMP/xla-52711-results"
 mkdir -p "$XLA_RESULT_DIR"
 printf '%s  %s\n' "$XLA_SOURCE_SHA256" xla/pjrt/cpu/cpu_client.cc \
   "$XLA_TEST_SHA256" xla/pjrt/cpu/cpu_pjrt_compiler_test.cc | sha256sum --check
