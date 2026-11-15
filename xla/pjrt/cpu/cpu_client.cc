@@ -231,6 +231,7 @@ void UpdateResultLayoutMemorySpaces(
 
 struct MlirCompilationSetup {
   XlaComputation computation;
+  bool delegate_to_xla_compile = false;
   std::vector<Shape> argument_layouts;
   std::vector<const Shape*> argument_layout_pointers;
   LayoutCanonicalizationCallback layout_callback;
@@ -239,6 +240,7 @@ struct MlirCompilationSetup {
 absl::Status ResolveXlaComputationLayouts(
     const XlaComputation& computation, CompileOptions& options,
     std::vector<const Shape*>& argument_layout_pointers) {
+  ABSL_RETURN_IF_ERROR(options.ApplyAllOptionOverrides());
   const ExecutableBuildOptions& build_options =
       options.executable_build_options;
   const bool allow_auto_layout =
@@ -275,8 +277,6 @@ absl::Status ResolveXlaComputationLayouts(
 absl::StatusOr<MlirCompilationSetup> SetupMlirCompilation(
     MaybeOwningMlirModule& module, CompileOptions& options,
     const CpuTopologyDescription& topology) {
-  // Resolve overrides before dumping inputs or converting MLIR to HLO. Do not
-  // reapply them after conversion, which may adjust the debug options.
   ABSL_RETURN_IF_ERROR(options.ApplyAllOptionOverrides());
   MlirCompilationSetup setup;
   int module_id = HloModule::GetNextUniqueModuleId();
@@ -293,8 +293,7 @@ absl::StatusOr<MlirCompilationSetup> SetupMlirCompilation(
   setup.computation = std::move(xla_computation);
 
   if (options.argument_layouts) {
-    ABSL_RETURN_IF_ERROR(ResolveXlaComputationLayouts(
-        setup.computation, options, setup.argument_layout_pointers));
+    setup.delegate_to_xla_compile = true;
     return setup;
   }
 
@@ -787,6 +786,10 @@ absl::StatusOr<std::unique_ptr<PjRtCpuExecutable>> PjRtCpuRawClient::Compile(
       SetupMlirCompilation(
           module, options,
           absl::down_cast<const CpuTopologyDescription&>(topology)));
+  if (setup.delegate_to_xla_compile) {
+    return Compile(setup.computation, topology, process_index,
+                   std::move(options));
+  }
   return CompileInternal(setup.computation, setup.argument_layout_pointers,
                          setup.layout_callback, std::move(options), topology,
                          process_index,
@@ -796,7 +799,6 @@ absl::StatusOr<std::unique_ptr<PjRtCpuExecutable>> PjRtCpuRawClient::Compile(
 absl::StatusOr<std::unique_ptr<PjRtCpuExecutable>> PjRtCpuRawClient::Compile(
     const XlaComputation& computation, const CpuTopologyDescription& topology,
     int process_index, CompileOptions&& options) {
-  ABSL_RETURN_IF_ERROR(options.ApplyAllOptionOverrides());
   std::vector<const Shape*> argument_layout_pointers;
   ABSL_RETURN_IF_ERROR(ResolveXlaComputationLayouts(computation, options,
                                                     argument_layout_pointers));
@@ -811,7 +813,6 @@ PjRtCpuRawClient::CompileAheadOfTime(const XlaComputation& computation,
                                      const CpuTopologyDescription& topology,
                                      int process_index,
                                      const AotCompilationOptions& aot_options) {
-  ABSL_RETURN_IF_ERROR(options.ApplyAllOptionOverrides());
   std::vector<const Shape*> argument_layout_pointers;
   ABSL_RETURN_IF_ERROR(ResolveXlaComputationLayouts(computation, options,
                                                     argument_layout_pointers));
@@ -837,6 +838,7 @@ absl::StatusOr<std::unique_ptr<PjRtCpuExecutable>> CompileCpuExecutableInternal(
     const CpuTopologyDescription& topology, CompileOptions&& options,
     CpuCompilationParams params) {
   tsl::profiler::TraceMe traceme("CompileCpuExecutable");
+  ABSL_RETURN_IF_ERROR(options.ApplyAllOptionOverrides());
 
   if (params.layout_canonicalization_callback) {
     options.executable_build_options.set_layout_canonicalization_callback(
@@ -972,7 +974,6 @@ absl::StatusOr<std::unique_ptr<PjRtCpuExecutable>> CompileCpuExecutable(
     const XlaComputation& computation, CompileOptions&& options,
     const CpuTopologyDescription& topology,
     std::function<void(HloModuleConfig&)> customize_hlo_module_config) {
-  ABSL_RETURN_IF_ERROR(options.ApplyAllOptionOverrides());
   std::vector<const Shape*> argument_layout_pointers;
   ABSL_RETURN_IF_ERROR(ResolveXlaComputationLayouts(computation, options,
                                                     argument_layout_pointers));
@@ -988,6 +989,11 @@ absl::StatusOr<std::unique_ptr<PjRtCpuExecutable>> CompileCpuExecutable(
     std::function<void(HloModuleConfig&)> customize_hlo_module_config) {
   ABSL_ASSIGN_OR_RETURN(MlirCompilationSetup setup,
                         SetupMlirCompilation(module, options, topology));
+  if (setup.delegate_to_xla_compile) {
+    return CompileCpuExecutable(std::move(setup.computation),
+                                std::move(options), topology,
+                                std::move(customize_hlo_module_config));
+  }
   return CompileCpuExecutableWithParams(
       std::move(setup.computation), std::move(setup.argument_layout_pointers),
       std::move(options), topology, std::move(customize_hlo_module_config),

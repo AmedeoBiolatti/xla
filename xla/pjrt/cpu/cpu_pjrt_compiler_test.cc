@@ -22,7 +22,6 @@ limitations under the License.
 #include <cstdlib>
 #include <memory>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -38,13 +37,11 @@ limitations under the License.
 #include "xla/backends/cpu/target_machine_options.h"
 #include "xla/debug_options_flags.h"
 #include "xla/hlo/builder/xla_computation.h"
-#include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/hlo/transforms/hlo_module_stitcher.h"
 #include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
 #include "xla/pjrt/maybe_owning_mlir_module.h"
 #include "xla/pjrt/mock_pjrt_client.h"
-#include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_compiler.h"
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/pjrt/plugin/xla_cpu/cpu_client_options.h"
@@ -53,7 +50,6 @@ limitations under the License.
 #include "xla/pjrt/plugin/xla_cpu/xla_cpu_pjrt_client.h"
 #include "xla/pjrt/proto/compile_options.pb.h"
 #include "xla/service/cpu/executable.pb.h"
-#include "xla/service/hlo_module_config.h"
 #include "xla/tsl/platform/env.h"
 
 namespace xla::cpu {
@@ -104,6 +100,12 @@ TEST_F(CpuPjrtCompilerTest, CompileXlaComputationSuccess) {
 
 TEST_F(CpuPjrtCompilerTest, CompileMlirOpSuccess) {
   xla::CompileOptions options;
+  *options.executable_build_options.mutable_debug_options() =
+      DefaultDebugOptionsIgnoringFlags();
+  std::string dump_dir;
+  ASSERT_TRUE(tsl::Env::Default()->LocalTempFilename(&dump_dir));
+  options.env_option_overrides = {{"xla_dump_to", dump_dir}};
+
   auto context = std::make_unique<mlir::MLIRContext>();
   context->loadDialect<mlir::func::FuncDialect, mlir::mhlo::MhloDialect>();
   auto mlir_module =
@@ -119,67 +121,12 @@ TEST_F(CpuPjrtCompilerTest, CompileMlirOpSuccess) {
                                                   std::move(mlir_module)),
                        *topology_description,
                        /*client=*/nullptr));
+
+  std::vector<std::string> dumps;
+  ASSERT_OK(tsl::Env::Default()->GetMatchingPaths(
+      tsl::io::JoinPath(dump_dir, "*", "module.mlir"), &dumps));
+  EXPECT_THAT(dumps, testing::SizeIs(1));
 }
-
-class CpuPjrtCompileOptionOverridesTest
-    : public CpuPjrtCompilerTest,
-      public testing::WithParamInterface<std::tuple<bool, bool, bool>> {};
-
-TEST_P(CpuPjrtCompileOptionOverridesTest, DumpInputsUsesOverrides) {
-  const auto [enable_dump, explicit_argument_layouts, use_client] = GetParam();
-  tsl::Env* env = tsl::Env::Default();
-  std::string dump_dir;
-  ASSERT_TRUE(env->LocalTempFilename(&dump_dir));
-  ASSERT_OK(env->RecursivelyCreateDir(dump_dir));
-
-  xla::CompileOptions options;
-  auto* debug_options = options.executable_build_options.mutable_debug_options();
-  *debug_options = DefaultDebugOptionsIgnoringFlags();
-  debug_options->set_xla_dump_to(enable_dump ? "" : dump_dir);
-  options.env_option_overrides = {
-      {"xla_dump_to", enable_dump ? dump_dir : std::string()}};
-  if (explicit_argument_layouts) {
-    // The program has no parameters. An engaged, empty vector exercises the
-    // explicit-argument-layout path through MLIR compilation.
-    options.argument_layouts.emplace();
-  }
-
-  auto context = std::make_unique<mlir::MLIRContext>();
-  context->loadDialect<mlir::func::FuncDialect, mlir::mhlo::MhloDialect>();
-  auto mlir_module =
-      mlir::parseSourceString<mlir::ModuleOp>(kMlirProgram, context.get());
-  ASSERT_TRUE(mlir_module);
-
-  std::unique_ptr<xla::PjRtClient> client;
-  if (use_client) {
-    ASSERT_OK_AND_ASSIGN(client,
-                         xla::GetXlaPjrtCpuClient(xla::CpuClientOptions()));
-  }
-  auto topology = GetDefaultCpuTopologyDescription();
-  xla::cpu::CpuPjRtCompiler compiler;
-  ASSERT_OK_AND_ASSIGN(
-      auto executable,
-      compiler.Compile(std::move(options),
-                       xla::MaybeOwningMlirModule(std::move(context),
-                                                 std::move(mlir_module)),
-                       *topology, client.get()));
-
-  for (absl::string_view filename :
-       {"module.mlir", "compile_options.textproto", "topology.textproto"}) {
-    std::vector<std::string> files;
-    ASSERT_OK(env->GetMatchingPaths(
-        tsl::io::JoinPath(dump_dir, "*", filename), &files));
-    EXPECT_THAT(files, testing::SizeIs(enable_dump ? 1 : 0)) << filename;
-  }
-  ASSERT_OK_AND_ASSIGN(auto hlo_modules, executable->GetHloModules());
-  ASSERT_THAT(hlo_modules, testing::SizeIs(1));
-  EXPECT_EQ(hlo_modules[0]->config().debug_options().xla_dump_to(),
-            enable_dump ? dump_dir : "");
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    CpuCompilation, CpuPjrtCompileOptionOverridesTest,
-    testing::Combine(testing::Bool(), testing::Bool(), testing::Bool()));
 
 TEST_F(CpuPjrtCompilerTest, CompileXlaComputationWithAvx512FeatureOn) {
   xla::CompileOptions options;
