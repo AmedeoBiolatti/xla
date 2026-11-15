@@ -1,0 +1,58 @@
+# Copyright 2026 The OpenXLA Authors.
+# SPDX-License-Identifier: Apache-2.0
+name: Validate final PJRT 52711 patch
+"on":
+  push:
+    branches: [validation/52711-final-20261115]
+permissions:
+  contents: read
+concurrency:
+  group: validate-52711-final
+  cancel-in-progress: false
+jobs:
+  cpu:
+    if: github.repository == 'AmedeoBiolatti/xla'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      XLA_BASE_SHA: 5592c20bfec6e5e7999c6acc5e6dc5190612a07d
+      XLA_SOURCE_SHA256: 12e31b563a1ddacf5ef68ae222edca04bb469e0fba8b7b7d655f4a372046e755
+      XLA_TEST_SHA256: 97e3bfa19b5d68c69efe96da4527bb9e012b2be57e88f04ebdd7e606f74b5dcd
+      XLA_RESULT_DIR: ${{ runner.temp }}/xla-52711-results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Install Clang 21
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v clang-21 >/dev/null; then
+            curl -fsSL https://apt.llvm.org/llvm.sh -o "$RUNNER_TEMP/llvm.sh"
+            sha256sum "$RUNNER_TEMP/llvm.sh"
+            sudo bash "$RUNNER_TEMP/llvm.sh" 21
+          fi
+          clang-21 --version
+      - name: Install pinned Bazel
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat .bazelversion)" = 8.8.2
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://releases.bazel.build/8.8.2/release/bazel-8.8.2-linux-x86_64
+          curl -fsSLO https://releases.bazel.build/8.8.2/release/bazel-8.8.2-linux-x86_64.sha256
+          sha256sum --check bazel-8.8.2-linux-x86_64.sha256
+          chmod +x bazel-8.8.2-linux-x86_64
+          echo "XLA_BAZEL=$RUNNER_TEMP/bazel-8.8.2-linux-x86_64" >> "$GITHUB_ENV"
+      - name: Validate unpatched regression and patched full suite
+        shell: bash
+        run: bash .github/validation/validate-52711-final.sh
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: pjrt-52711-final-validation
+          path: ${{ runner.temp }}/xla-52711-results
+          if-no-files-found: warn
+          retention-days: 14

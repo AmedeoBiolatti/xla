@@ -100,8 +100,6 @@ TEST_F(CpuPjrtCompilerTest, CompileXlaComputationSuccess) {
 
 TEST_F(CpuPjrtCompilerTest, CompileMlirOpSuccess) {
   xla::CompileOptions options;
-  *options.executable_build_options.mutable_debug_options() =
-      DefaultDebugOptionsIgnoringFlags();
   std::string dump_dir;
   ASSERT_TRUE(tsl::Env::Default()->LocalTempFilename(&dump_dir));
   options.env_option_overrides = {{"xla_dump_to", dump_dir}};
